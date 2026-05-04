@@ -1,0 +1,80 @@
+// =====================================================================
+// Hybrid Latency Lab — KQL queries
+// Workspace: <your LAW> ; App Insights: <your AI>
+// =====================================================================
+
+// 1) Per-run summary from App Insights custom traces
+//    (each batch run sets attributes: workload, run_id, items, roundtrips, duration_ms)
+let runs = traces
+| where message startswith "DONE workload="
+| extend
+    workload    = extract("workload=([^ ]+)", 1, message),
+    run_id      = extract("run_id=([^ ]+)", 1, message),
+    items       = toint(extract("items=([0-9]+)", 1, message)),
+    roundtrips  = toint(extract("roundtrips=([0-9]+)", 1, message)),
+    duration_ms = tolong(extract("duration_ms=([0-9]+)", 1, message))
+| project timestamp, workload, run_id, items, roundtrips, duration_ms;
+runs
+| summarize
+    runs       = count(),
+    avg_rt     = avg(roundtrips),
+    avg_dur_ms = avg(duration_ms),
+    p95_dur_ms = percentile(duration_ms, 95),
+    avg_items  = avg(items)
+  by workload
+| extend ms_per_roundtrip = avg_dur_ms / avg_rt
+| order by avg_dur_ms desc;
+
+
+// 2) Drill into a single run: every dependency call (round-trip)
+//    Replace <RUN_ID> with the run id printed by the script.
+let runId = "<RUN_ID>";
+union dependencies, traces
+| where operation_Name has runId or message has runId
+| project timestamp, operation_Name, name, target, data, duration, success, resultCode
+| order by timestamp asc;
+
+
+// 3) Round-trip cost over time (each query = one row)
+dependencies
+| where type == "postgresql" or target endswith "postgres.database.azure.com"
+| where operation_Name startswith "BatchRun-"
+| extend workload = iif(operation_Name startswith "BatchRun-chatty", "chatty", "chunky")
+| summarize roundtrips = count(), p95_ms = percentile(duration, 95)
+  by bin(timestamp, 1m), workload
+| render timechart;
+
+
+// 4) Heatmap: where do round-trips concentrate? (chatty should look dense)
+dependencies
+| where operation_Name startswith "BatchRun-"
+| extend workload = iif(operation_Name startswith "BatchRun-chatty", "chatty", "chunky")
+| summarize n = count() by bin(timestamp, 1s), workload
+| render columnchart;
+
+
+// 5) Total wall-clock vs sum of dependency durations (gap == client/CPU time)
+dependencies
+| where operation_Name startswith "BatchRun-"
+| summarize
+    network_time_ms = sum(duration),
+    roundtrips      = count()
+  by operation_Id, operation_Name
+| join kind=inner (
+    requests
+    | where name startswith "BatchRun-"
+    | project operation_Id, total_ms = duration
+  ) on operation_Id
+| extend pct_network = round(100.0 * network_time_ms / total_ms, 1)
+| order by total_ms desc;
+
+
+// 6) Connection Monitor RTT during the experiment window
+NWConnectionMonitorTestResult
+| where TimeGenerated > ago(1h)
+| summarize
+    avg_rtt_ms = avg(AvgRoundTripTimeMs),
+    p95_rtt_ms = percentile(AvgRoundTripTimeMs, 95),
+    loss_pct   = avg(ChecksFailedPercent)
+  by bin(TimeGenerated, 1m), SourceName, DestinationName
+| render timechart;

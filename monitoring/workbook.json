@@ -1,0 +1,76 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Hybrid Latency Lab\nChatty vs chunky workloads over a vWAN-connected hybrid environment. Each run carries a `run_id` you can use to slice every chart below."
+      }
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "tr",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "type": 4,
+            "value": { "durationMs": 3600000 },
+            "typeSettings": { "selectableValues": [
+              { "durationMs": 1800000 }, { "durationMs": 3600000 }, { "durationMs": 86400000 }
+            ] }
+          }
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where message startswith \"DONE workload=\"\n| extend workload = extract(\"workload=([^ ]+)\", 1, message),\n         run_id = extract(\"run_id=([^ ]+)\", 1, message),\n         items = toint(extract(\"items=([0-9]+)\", 1, message)),\n         roundtrips = toint(extract(\"roundtrips=([0-9]+)\", 1, message)),\n         duration_ms = tolong(extract(\"duration_ms=([0-9]+)\", 1, message))\n| project timestamp, workload, run_id, items, roundtrips, duration_ms\n| order by timestamp desc",
+        "size": 0,
+        "title": "Run summary (per workload)",
+        "timeContext": { "durationMs": 3600000 },
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where message startswith \"DONE workload=\"\n| extend workload = extract(\"workload=([^ ]+)\", 1, message),\n         duration_ms = tolong(extract(\"duration_ms=([0-9]+)\", 1, message)),\n         roundtrips = toint(extract(\"roundtrips=([0-9]+)\", 1, message))\n| summarize avg_dur_ms = avg(duration_ms), avg_rt = avg(roundtrips) by workload\n| extend ms_per_roundtrip = avg_dur_ms / avg_rt",
+        "size": 0,
+        "title": "Cost per round-trip (ms)",
+        "queryType": 0,
+        "visualization": "barchart",
+        "resourceType": "microsoft.insights/components"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "dependencies\n| where operation_Name startswith \"BatchRun-\"\n| extend workload = iif(operation_Name startswith \"BatchRun-chatty\", \"chatty\", \"chunky\")\n| summarize roundtrips = count() by bin(timestamp, 1s), workload\n| render timechart",
+        "size": 0,
+        "title": "Round-trips over time",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "NWConnectionMonitorTestResult\n| summarize avg_rtt_ms = avg(AvgRoundTripTimeMs), loss = avg(ChecksFailedPercent) by bin(TimeGenerated, 1m), DestinationName\n| render timechart",
+        "size": 0,
+        "title": "ExpressRoute / WAN RTT (Connection Monitor)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      }
+    }
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

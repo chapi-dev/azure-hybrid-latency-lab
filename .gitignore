@@ -1,0 +1,13 @@
+*.swp
+.vscode/
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+*.tfstate*
+.terraform/
+*.bicepparam.local
+secrets.env
+.env
+results/raw/
+*.log
