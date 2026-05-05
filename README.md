@@ -137,28 +137,6 @@ python scripts/build_notebook.py
 python -m jupyter nbconvert --to notebook --execute --inplace results/notebook/analysis.ipynb
 ```
 
-### Onboarding manual a Azure Arc
-
-Si te lo pide el examinador / auditor, en [`GUIA.md` § Paso 5](GUIA.md#paso-5--onboarding-de-la-vm-on-prem-a-azure-arc) está el detalle, pero los comandos clave son:
-
-```bash
-# Pre-crear un service principal con el rol mínimo para Arc
-az ad sp create-for-rbac -n hyblat-arc-onboard \
-  --role "Azure Connected Machine Onboarding" \
-  --scopes /subscriptions/<SUB>/resourceGroups/rg-hybrid-latency-lab
-
-# Onboarding desde la VM (recordatorio: MSFT_ARC_TEST=true se setea con
-# `systemctl set-environment` ANTES de instalar el agente — si no, falla)
-ssh azureuser@<onprem-ip>
-sudo systemctl set-environment MSFT_ARC_TEST=true
-curl -fsSL -o /tmp/install_arc.sh https://aka.ms/azcmagent
-sudo bash /tmp/install_arc.sh
-sudo azcmagent connect \
-  --service-principal-id <APP_ID> --service-principal-secret <SECRET> \
-  --tenant-id <TENANT_ID> --subscription-id <SUB_ID> \
-  --resource-group rg-hybrid-latency-lab --location westeurope \
-  --resource-name hyblat-onprem-arc --tags 'lab=hyblat'
-```
 
 ### Limpieza
 
