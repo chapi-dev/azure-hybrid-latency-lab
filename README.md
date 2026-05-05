@@ -165,7 +165,8 @@ az group delete -n rg-hybrid-latency-lab --yes --no-wait
 │   ├── setup_onprem.sh       # configura la VM on-prem (DNS, deps, netem)
 │   ├── post_deploy.sh        # one-shot: copia + onboarding + run + plot
 │   ├── run_experiments.sh    # ejecuta N×chatty + N×chunky → CSV
-│   └── requirements.txt
+│   ├── requirements.txt
+│   └── oracle/               # variantes Oracle (oracledb thin) — ver scripts/oracle/README.md
 ├── monitoring/
 │   ├── queries.kql           # KQL para App Insights / LAW
 │   └── workbook.json         # Workbook listo para importar
@@ -220,3 +221,9 @@ Workbook pre-armado: importa [`monitoring/workbook.json`](monitoring/workbook.js
 ## Licencia
 
 MIT — ver [LICENSE](LICENSE).
+
+---
+
+## ¿Y si tengo Oracle, no PostgreSQL?
+
+El patrón funciona igual contra Oracle (la latencia de red no entiende de motor). En [`scripts/oracle/`](scripts/oracle/) encontrarás las variantes equivalentes de los 4 scripts (`seed_oracle.py`, `chatty_oracle.py`, `chunky_oracle.py`, `latency_probe_oracle.py`) usando `python-oracledb` en *thin mode* (sin Instant Client). Mismas tablas, misma lógica, mismo formato de CSV — el notebook los procesa sin tocar `merge_raw_csvs.py` / `build_notebook.py`. Detalles, equivalencias columna a columna y cómo apuntar a Autonomous DB / Database@Azure en [`scripts/oracle/README.md`](scripts/oracle/README.md).
