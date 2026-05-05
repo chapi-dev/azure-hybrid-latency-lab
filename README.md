@@ -1,29 +1,45 @@
 # Azure Hybrid Latency Lab
 
-> A reproducible lab that **proves** the cost of "chatty" round-trips against a remote DB over a hybrid network — using **real Azure Virtual WAN**, an **Azure Arc–onboarded** "on-prem" Linux VM, a real **PostgreSQL Flexible Server**, and **Application Insights** to measure every single round-trip.
+> Un laboratorio reproducible que **demuestra** el coste real de los procesos *chatty* (muchas idas y vueltas) contra una BBDD remota a través de una red híbrida — usando **Azure Virtual WAN** real, una VM Linux "on-prem" **conectada con Azure Arc**, un **PostgreSQL Flexible Server** real y **Application Insights** para medir cada round-trip.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+🇪🇸 Español · [🇬🇧 English](README.en.md) · [📖 Guía paso a paso](GUIA.md)
 
-## Why this exists
+---
 
-A common pattern in hybrid architectures: a heavy batch process running on-prem talks to a database in Azure across a long distance. The DB is fast, the link is wide, but the batch takes hours because it issues thousands of tiny queries. Each query pays a full WAN RTT.
+## ¿Por qué existe esto?
 
-This lab reproduces that scenario end-to-end on Azure and measures it. You get:
+Patrón típico en arquitecturas híbridas: un proceso batch pesado on-prem habla con una BBDD en Azure a través de un ExpressRoute / VPN. La BBDD es rápida, el enlace es ancho, pero el batch tarda **horas** porque lanza miles de queries pequeñas. **Cada query paga el RTT completo de la WAN** (problema clásico N+1 / `ASYNC_NETWORK_IO`).
 
-- A real Azure **Virtual WAN** with a Standard hub.
-- A **spoke VNet** with an Azure VM and an Azure Database for **PostgreSQL Flexible Server** (VNet-injected, private DNS).
-- An **"on-prem" VNet** with a Linux VM that:
-  - has a `corp.local` hostname (not `.cloudapp.azure.com`),
-  - reaches the DB by a custom DNS alias,
-  - is **Arc-onboarded** so it shows up in Azure as a Hybrid Compute server,
-  - has **`tc netem`** injecting realistic WAN latency on its egress.
-- Two Python workloads doing the **same logical work** against the DB:
-  - `chatty.py` — N+1 round-trips
-  - `chunky.py` — set-based / `COPY` (constant round-trips)
-- **Application Insights** + **Log Analytics** + **Network Watcher Connection Monitor** for end-to-end correlation.
-- Generated PNG charts under `results/` using the actual telemetry from a real run.
+Este lab reproduce ese escenario de extremo a extremo en Azure y lo mide con números reales. La idea es separar de forma quirúrgica el efecto del **patrón de la aplicación** del efecto de la **distancia física**, ejecutando exactamente el mismo código contra exactamente la misma BBDD desde dos sitios distintos.
 
-## Architecture
+## Resultados reales medidos
+
+| Workload | Round-trips | Spoke (LAN, ~0.5 ms) | On-prem (WAN, 80 ms simulados) | Slowdown WAN/LAN |
+|---|---:|---:|---:|---:|
+| `chatty` (N+1) | 1003 | **2.63 s** | **85.46 s** | **32.5×** |
+| `chunky` (set-based) | 4 | 0.07 s | 1.16 s | 16.7× |
+
+RTT por query medido con sonda dedicada (`SELECT 1;` × 50, 1 sola conexión):
+
+| Entorno | p50 | p95 | max |
+|---|---:|---:|---:|
+| `spoke-lan` | **0.48 ms** | 0.80 ms | 1.14 ms |
+| `onprem-wan` | **79.31 ms** | 89.13 ms | 158.40 ms |
+
+El "impuesto WAN" predicho como `roundtrips × 80 ms` cuadra con el extra medido al céntimo (chatty: 80 s predicho vs 83 s medido). Confirma que el cuello de botella es la **latencia**, no la BBDD ni el ancho de banda.
+
+📊 **Análisis completo con tablas y gráficas**: [`results/notebook/analysis.ipynb`](results/notebook/analysis.ipynb) (ya ejecutado, GitHub lo renderiza inline).
+
+📁 **Datos crudos**: [`results/raw/`](results/raw/) — los 4 CSVs originales por entorno.
+
+![RTT por query — onprem (WAN) vs spoke (LAN)](results/notebook/fig_01_per_query_rtt.png)
+![El impuesto WAN = roundtrips × RTT por query](results/notebook/fig_03_wan_tax_prediction.png)
+![Round-trips vs duración (log-log): misma pendiente, dos altitudes](results/notebook/fig_05_scatter_log_log.png)
+
+---
+
+## Arquitectura
 
 ```mermaid
 flowchart LR
@@ -40,7 +56,7 @@ flowchart LR
         PG[("PostgreSQL Flex<br/>B1ms · VNet-injected<br/>private.postgres.database.azure.com")]
     end
 
-    subgraph mon["Observability"]
+    subgraph mon["Observabilidad"]
         LAW[(Log Analytics)]
         AI[(Application Insights)]
         NW[(Network Watcher<br/>Connection Monitor)]
@@ -49,233 +65,180 @@ flowchart LR
     OP -- "vWAN spoke conn" --> H
     H -- "vWAN spoke conn" --> VS
     H --> PG
-    OP -. telemetry .-> AI
-    VS -. telemetry .-> AI
+    OP -. telemetría .-> AI
+    VS -. telemetría .-> AI
     AI --> LAW
     NW --> LAW
 ```
 
-## Repo layout
+**Lo que se despliega:**
+- 1× **Azure Virtual WAN** Standard + 1× hub
+- 2× **VNets** (spoke + "on-prem") conectadas al hub
+- 2× **VMs Ubuntu 24.04** Standard_B2s_v2 (una en cada VNet)
+- 1× **PostgreSQL Flexible Server** B1ms con private DNS
+- 1× **Log Analytics workspace** + 1× **Application Insights**
+- 1× **Network Watcher Connection Monitor** probando TCP/5432 cada 60 s
+- La VM "on-prem" se **onboardea con Azure Arc** (modo `MSFT_ARC_TEST=true` porque debajo es una VM de Azure) y se le inyecta `tc netem 80 ms ± 5 ms` en el egress para simular WAN
 
-```
-.
-├── infra/             Bicep modules + deploy.sh / deploy.ps1
-│   ├── main.bicep
-│   └── modules/
-│       ├── observability.bicep
-│       ├── vwan.bicep
-│       ├── spoke-network.bicep
-│       ├── onprem-network.bicep
-│       ├── vm.bicep
-│       └── postgres.bicep
-├── scripts/
-│   ├── seed.py             # creates schema + N rows in PG
-│   ├── chatty.py           # N+1 anti-pattern, Application Insights instrumented
-│   ├── chunky.py           # bulk / set-based, same logical work
-│   ├── plot_results.py     # generates charts from the run CSV
-│   ├── setup_onprem.sh     # one-shot setup on the on-prem VM (DNS, deps, netem)
-│   ├── run_experiments.sh  # runs N×chatty + N×chunky and writes CSV
-│   └── requirements.txt
-├── monitoring/
-│   ├── queries.kql         # KQL for App Insights & LAW
-│   └── workbook.json       # Azure Workbook
-├── results/                # PNG charts + raw CSV from the actual run
-├── docs/                   # supplemental docs / architecture
-├── LICENSE                 # MIT
-└── README.md
-```
+**Coste**: ~ **0,40 €/h** mientras está desplegado (el vWAN hub Standard se lleva 0,25 €/h).
 
-## Prerequisites
+---
 
-- An Azure subscription where you can create:
-  - resource groups, VNets, vWAN, VMs, PostgreSQL Flexible Server, Log Analytics, Application Insights
-- Local tools: **az CLI**, **bicep** (bundled), **ssh-keygen**, **bash** (or PowerShell), **python ≥ 3.10** (only needed locally if you want to regenerate charts)
+## Cómo reproducirlo (resumen)
 
-## Deploy (45 min)
+> 📖 **Para una guía detallada paso a paso, en español, con todos los comandos y outputs esperados**, lee [`GUIA.md`](GUIA.md).
+
+### Pre-requisitos
+
+- Suscripción Azure con permisos de Owner (o Contributor + User Access Administrator) sobre el RG.
+- Herramientas locales: `az` CLI, `bicep` (viene con `az`), `ssh-keygen`, `bash` o PowerShell, Python ≥ 3.10 (sólo si quieres regenerar el notebook localmente).
+
+### Despliegue rápido (4 comandos)
 
 ```bash
-# 1. Generate an SSH keypair
+# 1. Generar par de claves SSH
 ssh-keygen -t ed25519 -f ~/.ssh/hyblat_id_ed25519 -N '' -C hybrid-latency-lab
 
-# 2. Login + select the right sub
+# 2. Login + seleccionar suscripción
 az login
-az account set --subscription "<your-subscription>"
+az account set --subscription "<TU_SUSCRIPCION>"
 
-# 3. Deploy
+# 3. Desplegar la infraestructura (~25 min, dominado por el vWAN hub)
 cd infra
-./deploy.sh                # writes a generated PG password to stdout — save it
+./deploy.sh                        # imprime la PG_PASSWORD generada — GUÁRDALA
+
+# 4. Onboarding + experimento + plot (one-shot, idempotente)
+export PG_PASSWORD="<la_que_imprimió_deploy.sh>"
+bash scripts/post_deploy.sh
 ```
 
-The deployment creates one resource group `rg-hybrid-latency-lab` containing:
+`post_deploy.sh` hace **todo lo siguiente automáticamente**:
 
-| Resource | Purpose |
-| --- | --- |
-| `hyblat-vwan` + `hyblat-hub` | Virtual WAN Standard with one hub (~25 min to provision) |
-| `hyblat-spoke-vnet` | Spoke VNet attached to hub |
-| `hyblat-onprem-vnet` | "On-prem" VNet attached to hub |
-| `hyblat-vm-spoke` | Standard_B2s_v2, Ubuntu 24.04 |
-| `hyblat-vm-onprem` | Standard_B2s_v2, Ubuntu 24.04 |
-| `hyblat-pg-…` | PostgreSQL Flexible Server B1ms, VNet-injected |
-| `hyblat-law` / `hyblat-ai` | Log Analytics + Application Insights |
+| Paso | Qué hace |
+|---|---|
+| 1 | Lee los outputs del despliegue (FQDN de PG, IPs, App Insights connection string) |
+| 2 | Copia `chatty.py`, `chunky.py`, `seed.py`, `run_experiments.sh` a la VM on-prem |
+| 3 | Ejecuta `setup_onprem.sh` en la VM on-prem (cambia hostname a `db-batch-server.corp.local`, instala deps, escribe `.env`, **inyecta `tc netem 80ms ± 5ms`**) |
+| 4 | Copia `seed.py` a la VM spoke y siembra la BBDD con 5000 filas (sin latencia añadida, va por LAN) |
+| 5 | Lanza `run_experiments.sh ITEMS=500 RUNS=3` en la on-prem (3 runs de chatty + 3 de chunky) |
+| 6 | Descarga el CSV con los resultados a `results/` |
+| 7 | Genera las gráficas PNG con `plot_results.py` |
 
-Ports `22/tcp` are open from the internet to both VMs (lab — restrict in production).
+### Repetir el experimento desde el spoke (LAN) y comparar
 
-## Run the experiment
+Para reproducir la comparación WAN-vs-LAN del notebook:
 
 ```bash
-# pick up the deployment outputs
-RG=rg-hybrid-latency-lab
-PG_FQDN=$(az postgres flexible-server list -g $RG --query "[0].fullyQualifiedDomainName" -o tsv)
-PG_PASSWORD="<the password printed by deploy.sh>"
-APPI_CS=$(az monitor app-insights component show -g $RG -a hyblat-ai --query connectionString -o tsv)
-ONPREM_IP=$(az vm show -d -g $RG -n hyblat-vm-onprem --query publicIps -o tsv)
+# Sigue Paso 7 de GUIA.md — instala el venv en la spoke, copia chatty/chunky/latency_probe,
+# y ejecuta los mismos scripts desde dentro del VNet de la BBDD.
+# Después:
+python scripts/merge_raw_csvs.py
+python scripts/build_notebook.py
+python -m jupyter nbconvert --to notebook --execute --inplace results/notebook/analysis.ipynb
+```
 
-# 1. Onboard the "on-prem" VM (DNS, deps, latency injection)
-scp -i ~/.ssh/hyblat_id_ed25519 scripts/setup_onprem.sh azureuser@$ONPREM_IP:/tmp/
-scp -i ~/.ssh/hyblat_id_ed25519 scripts/{chatty,chunky,seed}.py azureuser@$ONPREM_IP:/home/azureuser/latency-lab/
-scp -i ~/.ssh/hyblat_id_ed25519 scripts/run_experiments.sh azureuser@$ONPREM_IP:/home/azureuser/latency-lab/
-ssh -i ~/.ssh/hyblat_id_ed25519 azureuser@$ONPREM_IP \
-  "sudo bash /tmp/setup_onprem.sh '$PG_FQDN' '$PG_PASSWORD' '$APPI_CS' 80"
+### Onboarding manual a Azure Arc
 
-# 2. Onboard to Azure Arc (test-mode, since it's actually an Azure VM)
-#    The installer reads MSFT_ARC_TEST from systemd's environment, NOT the shell,
-#    so you must `systemctl set-environment` it first or the installer refuses.
-ssh azureuser@$ONPREM_IP <<'EOF'
+Si te lo pide el examinador / auditor, en [`GUIA.md` § Paso 5](GUIA.md#paso-5--onboarding-de-la-vm-on-prem-a-azure-arc) está el detalle, pero los comandos clave son:
+
+```bash
+# Pre-crear un service principal con el rol mínimo para Arc
+az ad sp create-for-rbac -n hyblat-arc-onboard \
+  --role "Azure Connected Machine Onboarding" \
+  --scopes /subscriptions/<SUB>/resourceGroups/rg-hybrid-latency-lab
+
+# Onboarding desde la VM (recordatorio: MSFT_ARC_TEST=true se setea con
+# `systemctl set-environment` ANTES de instalar el agente — si no, falla)
+ssh azureuser@<onprem-ip>
 sudo systemctl set-environment MSFT_ARC_TEST=true
 curl -fsSL -o /tmp/install_arc.sh https://aka.ms/azcmagent
 sudo bash /tmp/install_arc.sh
-
-# Pre-create a least-privilege SP with the Arc onboarding role:
-#   az ad sp create-for-rbac -n hyblat-arc-onboard \
-#     --role "Azure Connected Machine Onboarding" \
-#     --scopes /subscriptions/<SUB>/resourceGroups/rg-hybrid-latency-lab
 sudo azcmagent connect \
   --service-principal-id <APP_ID> --service-principal-secret <SECRET> \
   --tenant-id <TENANT_ID> --subscription-id <SUB_ID> \
   --resource-group rg-hybrid-latency-lab --location westeurope \
   --resource-name hyblat-onprem-arc --tags 'lab=hyblat'
-EOF
-
-# 3. Seed the DB (run from the spoke VM where the route is short)
-SPOKE_IP=$(az vm show -d -g $RG -n hyblat-vm-spoke --query publicIps -o tsv)
-ssh azureuser@$SPOKE_IP \
-  "PG_CONNINFO='host=$PG_FQDN dbname=latencylab user=pgadmin password=$PG_PASSWORD sslmode=require' python3 seed.py --rows 5000"
-
-# 4. Run the experiments from the on-prem VM
-ssh azureuser@$ONPREM_IP "cd /home/azureuser/latency-lab && bash run_experiments.sh 500 3"
-scp -i ~/.ssh/hyblat_id_ed25519 azureuser@$ONPREM_IP:/home/azureuser/latency-lab/results-*.csv results/
-
-# 5. Plot
-python scripts/plot_results.py --csv results/results-*.csv --out results/
 ```
 
-## What the charts show
-
-Generated in `results/` after a real run:
-
-| Chart | What it shows |
-| --- | --- |
-| `chart_roundtrips.png` | Mean round-trips per workload (chatty ≫ chunky). |
-| `chart_duration.png` | Mean wall-clock duration. The gap is the WAN tax. |
-| `chart_scatter.png` | log-log scatter of round-trips vs duration. The slope ≈ RTT. |
-| `chart_per_run.png` | Run-by-run consistency check. |
-
-## Real run results (3 × chatty + 3 × chunky, 500 items, 80 ms simulated WAN RTT)
-
-The CSV in `results/` was produced by the actual deployed lab:
-
-| Workload | avg round-trips | avg duration | x slower |
-| --- | ---: | ---: | ---: |
-| chunky | **4** | **1.18 s** | 1.0× (baseline) |
-| chatty | **1003** | **85.67 s** | **72.7×** |
-
-Same logical work, same DB, same network. The only difference is whether the
-client batches its work or pays the WAN RTT on every row.
-
-![Round-trips per workload](results/chart_roundtrips.png)
-![Duration per workload](results/chart_duration.png)
-![Round-trips vs duration (log-log)](results/chart_scatter.png)
-![Per-run duration](results/chart_per_run.png)
-
-## Arc + Connection Monitor (verified)
-
-The "on-prem" VM is onboarded as an **Azure Arc Connected Machine**, so it shows
-up in the portal under **Servers - Azure Arc** as a hybrid resource — exactly as
-a real on-prem box would, even though it's a managed Azure VM under the hood
-(this is what `MSFT_ARC_TEST=true` is for).
-
-```bash
-az connectedmachine show -g rg-hybrid-latency-lab -n hyblat-onprem-arc \
-  --query "{name:name, status:status, osName:osName, agentVersion:agentVersion}" -o table
-# Name                Status     OsName    AgentVersion
-# hyblat-onprem-arc   Connected  linux     1.63.x
-```
-
-A **Network Watcher Connection Monitor** (`hyblat-cm-onprem-to-pg`) probes the
-PostgreSQL Flexible Server's private IP on TCP/5432 every 60 s from the on-prem
-VM, and writes the results to the same Log Analytics workspace as the
-applicative telemetry — so you can correlate the WAN RTT trace with the
-chatty/chunky run timeline:
-
-```kusto
-NWConnectionMonitorTestResult
-| where TestGroupName == "DefaultTestGroup"
-| summarize avg(AvgRoundTripTimeMs) by bin(TimeGenerated, 5m), TestResult
-| render timechart
-```
-
-This is what closes the loop on the original ask: "I want to know the network RTT and
-the application's round-trip count, side by side, on the same time axis."
-
-## WAN vs LAN comparison (Jupyter notebook)
-
-A second pass of the experiment was run from **both** ends:
-
-- `onprem-wan`: from the Arc-onboarded "on-prem" VM, with `tc netem 80 ms` on egress.
-- `spoke-lan`: from a VM inside the same VNet as PostgreSQL (~0.5 ms RTT).
-
-Same scripts, same DB, same dataset. The full analysis — including a 50-sample
-per-query latency probe and a "WAN tax = roundtrips × RTT" prediction check —
-is checked into [`results/notebook/analysis.ipynb`](results/notebook/analysis.ipynb)
-so you can read it offline (outputs are baked in) or re-execute it locally.
-
-| Workload | Round-trips | LAN duration | WAN duration | WAN slowdown |
-| --- | ---: | ---: | ---: | ---: |
-| `chatty` (N+1)        | 1003 | 2.63 s | 85.46 s | **32.5×** |
-| `chunky` (set-based)  |    4 | 0.07 s |  1.16 s |   16.7×   |
-
-![Per-query RTT — onprem (WAN) vs spoke (LAN)](results/notebook/fig_01_per_query_rtt.png)
-![The WAN tax = roundtrips × per-query RTT](results/notebook/fig_03_wan_tax_prediction.png)
-![Round-trips vs duration: same slope, two altitudes](results/notebook/fig_05_scatter_log_log.png)
-
-## Querying telemetry yourself
-
-See `monitoring/queries.kql`. Highlights:
-
-- Run summary by workload (`avg_dur_ms`, `avg_rt`, **`ms_per_roundtrip`**)
-- Time-series of round-trips (chatty looks like a wall, chunky looks like 2 spikes)
-- Total wall-clock vs sum of dependency durations (the gap is client/CPU time)
-- Connection Monitor RTT during the experiment
-
-Import `monitoring/workbook.json` into Azure Portal → Workbooks → **+ New** → **Advanced editor** to get a pre-baked dashboard.
-
-## Cost
-
-≈ **$0.40/hour** while deployed:
-
-| Resource | Cost (approx., West Europe) |
-| --- | --- |
-| vWAN hub Standard | $0.25/h |
-| 2× B2s VMs | $0.08/h |
-| PG Flex B1ms | $0.02/h |
-| LAW + App Insights ingestion | a few cents/day |
-
-**Tear it all down** with:
+### Limpieza
 
 ```bash
 az group delete -n rg-hybrid-latency-lab --yes --no-wait
 ```
 
-## License
+---
 
-MIT — see [LICENSE](LICENSE).
+## Estructura del repo
+
+```
+.
+├── infra/                 # Plantillas Bicep + scripts de despliegue
+│   ├── deploy.sh / deploy.ps1
+│   ├── main.bicep            (despliegue principal)
+│   └── modules/              (vwan, spoke, onprem, vm, postgres, observability)
+├── scripts/
+│   ├── seed.py               # crea esquema + N filas en PG
+│   ├── chatty.py             # patrón N+1, instrumentado con App Insights
+│   ├── chunky.py             # set-based, mismo trabajo lógico, 4 round-trips
+│   ├── latency_probe.py      # 50× SELECT 1 (1 sola conexión) — RTT puro
+│   ├── plot_results.py       # gráficas PNG del run on-prem
+│   ├── merge_raw_csvs.py     # raw/ → notebook/ (añade columna env_label)
+│   ├── build_notebook.py     # construye analysis.ipynb (nbformat)
+│   ├── setup_onprem.sh       # configura la VM on-prem (DNS, deps, netem)
+│   ├── post_deploy.sh        # one-shot: copia + onboarding + run + plot
+│   ├── run_experiments.sh    # ejecuta N×chatty + N×chunky → CSV
+│   └── requirements.txt
+├── monitoring/
+│   ├── queries.kql           # KQL para App Insights / LAW
+│   └── workbook.json         # Workbook listo para importar
+├── results/
+│   ├── raw/                  # CSVs crudos por entorno (entrada del notebook)
+│   ├── notebook/             # analysis.ipynb + figuras + CSVs unificados
+│   └── chart_*.png           # gráficas del primer run on-prem
+├── docs/
+│   └── architecture.md
+├── GUIA.md                   # guía detallada paso a paso (ESPAÑOL)
+├── README.md                 # este fichero
+├── README.en.md              # versión inglesa
+└── LICENSE
+```
+
+---
+
+## Análisis del experimento
+
+El notebook [`results/notebook/analysis.ipynb`](results/notebook/analysis.ipynb) contiene 6 secciones con narrativa + gráficas + tablas:
+
+1. **Introducción y dataset** — qué es cada entorno, qué workload se ejecutó.
+2. **RTT por query** — sonda de 50 muestras, boxplot + serie temporal.
+3. **Duración por workload** — bar chart agrupado WAN vs LAN.
+4. **Descomposición del impuesto WAN** — `predicted = roundtrips × RTT`. La predicción cuadra con la medición.
+5. **Consistencia run-a-run** — los 3 runs de cada workload.
+6. **Scatter log-log** — round-trips vs duración. Ambos workloads caen sobre una recta cuya pendiente **es** el RTT por query.
+
+Las 5 gráficas también están como PNGs sueltos en [`results/notebook/`](results/notebook/) por si quieres embeberlas en una presentación.
+
+## Telemetría on-the-wire
+
+Aparte del notebook offline, todo lo que ocurre se escribe a Application Insights / Log Analytics. Algunas queries listas para usar en [`monitoring/queries.kql`](monitoring/queries.kql):
+
+```kusto
+// Resumen por workload, calculando el ms_per_roundtrip (≈ RTT efectivo)
+dependencies
+| where timestamp > ago(1h)
+| where name in ("chatty.run", "chunky.run")
+| summarize avg_dur_ms = avg(duration), avg_rt = avg(toint(customDimensions.roundtrips)), runs = count() by name
+| extend ms_per_roundtrip = avg_dur_ms / avg_rt
+
+// RTT del Connection Monitor durante el experimento
+NWConnectionMonitorTestResult
+| where TestGroupName == "DefaultTestGroup"
+| summarize avg(AvgRoundTripTimeMs) by bin(TimeGenerated, 1m), TestResult
+| render timechart
+```
+
+Workbook pre-armado: importa [`monitoring/workbook.json`](monitoring/workbook.json) en *Azure Portal → Workbooks → + New → Advanced editor*.
+
+## Licencia
+
+MIT — ver [LICENSE](LICENSE).
