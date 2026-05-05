@@ -138,10 +138,22 @@ ssh -i ~/.ssh/hyblat_id_ed25519 azureuser@$ONPREM_IP \
   "sudo bash /tmp/setup_onprem.sh '$PG_FQDN' '$PG_PASSWORD' '$APPI_CS' 80"
 
 # 2. Onboard to Azure Arc (test-mode, since it's actually an Azure VM)
+#    The installer reads MSFT_ARC_TEST from systemd's environment, NOT the shell,
+#    so you must `systemctl set-environment` it first or the installer refuses.
 ssh azureuser@$ONPREM_IP <<'EOF'
-sudo MSFT_ARC_TEST=true bash -c "$(curl -fsSL https://aka.ms/azcmagent)"
-sudo azcmagent connect --resource-group rg-hybrid-latency-lab --location westeurope \
-   --tenant-id <TENANT_ID> --subscription-id <SUB_ID> --use-device-code
+sudo systemctl set-environment MSFT_ARC_TEST=true
+curl -fsSL -o /tmp/install_arc.sh https://aka.ms/azcmagent
+sudo bash /tmp/install_arc.sh
+
+# Pre-create a least-privilege SP with the Arc onboarding role:
+#   az ad sp create-for-rbac -n hyblat-arc-onboard \
+#     --role "Azure Connected Machine Onboarding" \
+#     --scopes /subscriptions/<SUB>/resourceGroups/rg-hybrid-latency-lab
+sudo azcmagent connect \
+  --service-principal-id <APP_ID> --service-principal-secret <SECRET> \
+  --tenant-id <TENANT_ID> --subscription-id <SUB_ID> \
+  --resource-group rg-hybrid-latency-lab --location westeurope \
+  --resource-name hyblat-onprem-arc --tags 'lab=hyblat'
 EOF
 
 # 3. Seed the DB (run from the spoke VM where the route is short)
@@ -184,6 +196,36 @@ client batches its work or pays the WAN RTT on every row.
 ![Duration per workload](results/chart_duration.png)
 ![Round-trips vs duration (log-log)](results/chart_scatter.png)
 ![Per-run duration](results/chart_per_run.png)
+
+## Arc + Connection Monitor (verified)
+
+The "on-prem" VM is onboarded as an **Azure Arc Connected Machine**, so it shows
+up in the portal under **Servers - Azure Arc** as a hybrid resource — exactly as
+a real on-prem box would, even though it's a managed Azure VM under the hood
+(this is what `MSFT_ARC_TEST=true` is for).
+
+```bash
+az connectedmachine show -g rg-hybrid-latency-lab -n hyblat-onprem-arc \
+  --query "{name:name, status:status, osName:osName, agentVersion:agentVersion}" -o table
+# Name                Status     OsName    AgentVersion
+# hyblat-onprem-arc   Connected  linux     1.63.x
+```
+
+A **Network Watcher Connection Monitor** (`hyblat-cm-onprem-to-pg`) probes the
+PostgreSQL Flexible Server's private IP on TCP/5432 every 60 s from the on-prem
+VM, and writes the results to the same Log Analytics workspace as the
+applicative telemetry — so you can correlate the WAN RTT trace with the
+chatty/chunky run timeline:
+
+```kusto
+NWConnectionMonitorTestResult
+| where TestGroupName == "DefaultTestGroup"
+| summarize avg(AvgRoundTripTimeMs) by bin(TimeGenerated, 5m), TestResult
+| render timechart
+```
+
+This closes the loop on the original ask: "I want to know the network RTT and
+the application's round-trip count, side by side, on the same time axis."
 
 ## Querying telemetry yourself
 
