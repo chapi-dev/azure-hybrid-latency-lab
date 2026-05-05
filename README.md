@@ -224,8 +224,29 @@ NWConnectionMonitorTestResult
 | render timechart
 ```
 
-This closes the loop on the original ask: "I want to know the network RTT and
+This is what closes the loop on the original ask: "I want to know the network RTT and
 the application's round-trip count, side by side, on the same time axis."
+
+## WAN vs LAN comparison (Jupyter notebook)
+
+A second pass of the experiment was run from **both** ends:
+
+- `onprem-wan`: from the Arc-onboarded "on-prem" VM, with `tc netem 80 ms` on egress.
+- `spoke-lan`: from a VM inside the same VNet as PostgreSQL (~0.5 ms RTT).
+
+Same scripts, same DB, same dataset. The full analysis — including a 50-sample
+per-query latency probe and a "WAN tax = roundtrips × RTT" prediction check —
+is checked into [`results/notebook/analysis.ipynb`](results/notebook/analysis.ipynb)
+so you can read it offline (outputs are baked in) or re-execute it locally.
+
+| Workload | Round-trips | LAN duration | WAN duration | WAN slowdown |
+| --- | ---: | ---: | ---: | ---: |
+| `chatty` (N+1)        | 1003 | 2.63 s | 85.46 s | **32.5×** |
+| `chunky` (set-based)  |    4 | 0.07 s |  1.16 s |   16.7×   |
+
+![Per-query RTT — onprem (WAN) vs spoke (LAN)](results/notebook/fig_01_per_query_rtt.png)
+![The WAN tax = roundtrips × per-query RTT](results/notebook/fig_03_wan_tax_prediction.png)
+![Round-trips vs duration: same slope, two altitudes](results/notebook/fig_05_scatter_log_log.png)
 
 ## Querying telemetry yourself
 

@@ -1,0 +1,13 @@
+env_label,workload,run_id,items,roundtrips,duration_ms
+onprem-wan,chatty,0f2e12bb-a954-4aa9-9124-3cebf21f88ba,500,1003,84611
+onprem-wan,chatty,9e36b0e3-0203-467e-a6b5-d9b9e58c6339,500,1003,84937
+onprem-wan,chatty,54f7f956-81ce-4489-9f3c-4d7fbb9b4374,500,1003,86825
+onprem-wan,chunky,2381f6a0-6347-466c-a9c6-56d32b715b74,500,4,1120
+onprem-wan,chunky,19ab1b8c-3c06-4c8d-962b-762f6deec9c2,500,4,1122
+onprem-wan,chunky,6866f4f7-d840-4947-8f3c-38deb3656965,500,4,1249
+spoke-lan,chatty,9b767786-9199-4332-9a12-e4e93b3a462f,500,1003,2376
+spoke-lan,chatty,41994dc8-15ac-4e4d-9540-45faedfd9ffd,500,1003,2815
+spoke-lan,chatty,d8a72bf2-7902-4e4a-a637-41417cb80a0c,500,1003,2695
+spoke-lan,chunky,2f2db275-6eca-4402-874a-d69736650318,500,4,81
+spoke-lan,chunky,db0cbc0f-93ca-4a4b-b204-500bf13de630,500,4,65
+spoke-lan,chunky,b938eeb5-88a3-4e8e-9a11-680902900a08,500,4,58
