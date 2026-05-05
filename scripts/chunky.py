@@ -24,6 +24,9 @@ WORKLOAD = "chunky"
 
 
 def setup_telemetry(run_id: str) -> trace.Tracer:
+    for noisy in ("azure", "azure.core.pipeline.policies.http_logging_policy",
+                  "azure.monitor", "urllib3", "opentelemetry.exporter"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     cs = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
     if cs:
         configure_azure_monitor(

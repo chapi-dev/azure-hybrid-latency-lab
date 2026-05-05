@@ -54,8 +54,10 @@ EOF
 
 echo "[5/6] Writing /home/azureuser/latency-lab/.env (NOT committed)…"
 cat > /home/azureuser/latency-lab/.env <<EOF
-PG_CONNINFO=host=pg-prod.corp.local dbname=latencylab user=pgadmin password=${PG_PASSWORD} sslmode=require
-APPLICATIONINSIGHTS_CONNECTION_STRING=${APPI_CS}
+PG_CONNINFO="host=pg-prod.corp.local dbname=latencylab user=pgadmin password=${PG_PASSWORD} sslmode=require"
+APPLICATIONINSIGHTS_CONNECTION_STRING="${APPI_CS}"
+AZURE_LOG_LEVEL=warning
+OTEL_LOG_LEVEL=warn
 EOF
 chown azureuser:azureuser /home/azureuser/latency-lab/.env
 chmod 600 /home/azureuser/latency-lab/.env

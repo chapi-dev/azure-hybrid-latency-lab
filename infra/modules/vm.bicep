@@ -6,7 +6,7 @@ param adminUsername string
 param sshPublicKey string
 param tags object
 param enablePublicIp bool = true
-param vmSize string = 'Standard_B2s'
+param vmSize string = 'Standard_B2s_v2'
 
 resource pip 'Microsoft.Network/publicIPAddresses@2023-11-01' = if (enablePublicIp) {
   name: '${vmName}-pip'

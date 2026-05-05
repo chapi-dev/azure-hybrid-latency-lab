@@ -1,0 +1,7 @@
+workload,run_id,items,roundtrips,duration_ms
+chatty,37f646ce-21a2-42f5-a92a-4e2db8eb960a,500,1003,84807
+chatty,75c673e3-a885-4f6a-83f6-ac9ce92849b3,500,1003,84981
+chatty,4cc510bf-a740-4310-b686-82b8a549c5cb,500,1003,87208
+chunky,2f0c57e9-ed42-4258-acf8-aac76ac03303,500,4,1209
+chunky,0bff7338-aa4e-484c-b4df-ec750203cf76,500,4,1183
+chunky,b7907731-70d3-45ee-aee1-8dbbea74ca47,500,4,1141

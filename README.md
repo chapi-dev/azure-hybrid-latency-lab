@@ -113,8 +113,8 @@ The deployment creates one resource group `rg-hybrid-latency-lab` containing:
 | `hyblat-vwan` + `hyblat-hub` | Virtual WAN Standard with one hub (~25 min to provision) |
 | `hyblat-spoke-vnet` | Spoke VNet attached to hub |
 | `hyblat-onprem-vnet` | "On-prem" VNet attached to hub |
-| `hyblat-vm-spoke` | Standard_B2s, Ubuntu 24.04 |
-| `hyblat-vm-onprem` | Standard_B2s, Ubuntu 24.04 |
+| `hyblat-vm-spoke` | Standard_B2s_v2, Ubuntu 24.04 |
+| `hyblat-vm-onprem` | Standard_B2s_v2, Ubuntu 24.04 |
 | `hyblat-pg-…` | PostgreSQL Flexible Server B1ms, VNet-injected |
 | `hyblat-law` / `hyblat-ai` | Log Analytics + Application Insights |
 
@@ -167,6 +167,23 @@ Generated in `results/` after a real run:
 | `chart_duration.png` | Mean wall-clock duration. The gap is the WAN tax. |
 | `chart_scatter.png` | log-log scatter of round-trips vs duration. The slope ≈ RTT. |
 | `chart_per_run.png` | Run-by-run consistency check. |
+
+## Real run results (3 × chatty + 3 × chunky, 500 items, 80 ms simulated WAN RTT)
+
+The CSV in `results/` was produced by the actual deployed lab:
+
+| Workload | avg round-trips | avg duration | x slower |
+| --- | ---: | ---: | ---: |
+| chunky | **4** | **1.18 s** | 1.0× (baseline) |
+| chatty | **1003** | **85.67 s** | **72.7×** |
+
+Same logical work, same DB, same network. The only difference is whether the
+client batches its work or pays the WAN RTT on every row.
+
+![Round-trips per workload](results/chart_roundtrips.png)
+![Duration per workload](results/chart_duration.png)
+![Round-trips vs duration (log-log)](results/chart_scatter.png)
+![Per-run duration](results/chart_per_run.png)
 
 ## Querying telemetry yourself
 
