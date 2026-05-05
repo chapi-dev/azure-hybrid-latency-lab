@@ -9,5 +9,4 @@ __pycache__/
 *.bicepparam.local
 secrets.env
 .env
-results/raw/
 *.log
